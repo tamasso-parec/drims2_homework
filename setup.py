@@ -26,7 +26,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'demo_node = drims2_homework.drims2_homework_node:main',
+            'demo_node = drims2_homework.demo_node:main',
         ],
     },
 )
