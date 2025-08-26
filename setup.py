@@ -27,6 +27,8 @@ setup(
     entry_points={
         'console_scripts': [
             'demo_node = drims2_homework.demo_node:main',
+            'vision_test = drims2_homework.vision_test:main'
+
         ],
     },
 )
