@@ -55,12 +55,24 @@ class VisionTest(Node):
         mask = self.segment_die(cv_image)
 
         # Get die contours
-        countour, hierarchy = self.find_die_contour(mask)
+        die_countour, die_hierarchy = self.find_die_contour(mask)
+        # Select internal contours (those with a parent, i.e., hierarchy[0][i][3] != -1)
+        internal_contours = [cnt for i, cnt in enumerate(die_countour) if die_hierarchy[0][i][3] != -1]
 
+        
+            
+
+        circle_contr, circle_hier = self.find_circles(mask)
+
+        cv2.drawContours(cv_image, internal_contours, -1, (0,255,0), 3)
         # print(len(countour))
 
+
+
         # Draw contours on the image
-        cv2.drawContours(cv_image, countour, -1, (0,255,0), 3)
+        # cv2.drawContours(cv_image, countour, -1, (0,255,0), 3)
+
+        # cv2.drawContours(cv_image, circle_conts, -1, (0,0,255), 3)
 
         cv_image = cv2.resize(cv_image, (640, 480))
         # # cv_image = mask
@@ -114,7 +126,16 @@ class VisionTest(Node):
         cnts, hierarchy = cv2.findContours(mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
         
         return cnts, hierarchy
+    
+    def find_circles(self, mask): 
 
+        el = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+
+        mask = cv2.morphologyEx(mask,  cv2.MORPH_DILATE, el)
+
+        cnts, hierarchy = cv2.findContours(mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+
+        return cnts, hierarchy
 
     def dice_identification(self):
         if not self.dice_identification_client.wait_for_service(timeout_sec=5.0):
