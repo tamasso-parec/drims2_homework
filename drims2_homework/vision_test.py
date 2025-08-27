@@ -26,29 +26,34 @@ class VisionTest(Node):
             10
         )
 
+        self.background_limit = None
+
     def rgb_callback(self, msg):
         # self.get_logger().info(f"Received RGB image with size: {msg.width}x{msg.height}")
 
         cv_image = CvBridge().imgmsg_to_cv2(msg, desired_encoding='bgr8')
 
-        # Segment the background of the dice
-        mask = self.segment_background(cv_image)
+        if self.background_limit == None:
 
-        # Extract the contour to identify where the dice will be
-        contours, hierarchy = self.contour_background(mask)
+            # Segment the background of the dice
+            mask = self.segment_background(cv_image)
 
-        # cv2.drawContours(cv_image, contours, -1, (0,255,0), 3)
+            # Extract the contour to identify where the dice will be
+            contours, hierarchy = self.contour_background(mask)
 
-        # Get bounding box of the contour in order to crop the image
-        bbox = self.bound_background(contours, hierarchy)
+            # cv2.drawContours(cv_image, contours, -1, (0,255,0), 3)
+
+            # Get bounding box of the contour in order to crop the image
+            self.background_limit = self.bound_background(contours, hierarchy)
+
+            
 
         # Crop the image so that only the green screen and the dice are visible
-        if bbox is not None:
-            x, y, w, h = bbox
-            cv2.rectangle(cv_image, (x, y), (x + w, y + h), (255, 0, 0), 2)
+        x, y, w, h = self.background_limit
+        cv2.rectangle(cv_image, (x, y), (x + w, y + h), (255, 0, 0), 2)
 
-            # Crop the image to the bounding box
-            cv_image = cv_image[y:y+h, x:x+w]
+        # Crop the image to the bounding box
+        cv_image = cv_image[y:y+h, x:x+w]
 
 
         # Find the die
@@ -59,12 +64,15 @@ class VisionTest(Node):
         # Select internal contours (those with a parent, i.e., hierarchy[0][i][3] != -1)
         internal_contours = [cnt for i, cnt in enumerate(die_countour) if die_hierarchy[0][i][3] != -1]
 
-        
-            
+        # For each internal contour, fit an ellipse
+        for cnt in internal_contours:
+            if len(cnt) >= 5:  # Fit ellipse requires at least 5 points
+                ellipse = cv2.fitEllipse(cnt)
+                cv2.ellipse(cv_image, ellipse, (0, 0, 255), 2)
 
         circle_contr, circle_hier = self.find_circles(mask)
 
-        cv2.drawContours(cv_image, internal_contours, -1, (0,255,0), 3)
+        # cv2.drawContours(cv_image, internal_contours, -1, (0,255,0), 3)
         # print(len(countour))
 
 
@@ -108,16 +116,16 @@ class VisionTest(Node):
         largest_contour = max(contours, key=cv2.contourArea)
 
         # Get the bounding rectangle for the largest contour
-        x, y, w, h = cv2.boundingRect(largest_contour)
+        bbox  = cv2.boundingRect(largest_contour) #x, y, w, h
 
-        return (x, y, w, h)
+        return bbox
 
     def segment_die(self, image): 
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(hsv, HSV_LO, HSV_HI)
         # mask = cv2.dilate(mask, np.ones((5,5), np.uint8), iterations=1)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3,3), np.uint8))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5,5), np.uint8))
+        # mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5,5), np.uint8))
 
         return mask
     
