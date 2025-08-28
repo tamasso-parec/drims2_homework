@@ -1,14 +1,4 @@
-import rclpy
-from rclpy.node import Node
-from geometry_msgs.msg import PoseStamped
-from drims2_motion_server.motion_client import MotionClient
-from drims2_msgs.srv import DiceIdentification
-from moveit_msgs.msg import MoveItErrorCodes
-
-from sensor_msgs.msg import Image
-import cv2
-from cv_bridge import CvBridge
-import numpy as np
+from drims2_homework.vision_lib import *
 
 
 # --- Params (tune once) ---
@@ -28,7 +18,17 @@ class VisionTest(Node):
 
         self.background_limit = None
 
-        self.set_blob_detector()
+        # --- Camera intrinsics
+        self.intrinsics = np.array(
+            [[1.57855692e+03, 0.00000000e+00, 9.52440456e+02],
+             [0.00000000e+00, 1.58246225e+03, 5.45655012e+02],
+             [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]],
+            dtype=np.float64
+        )
+
+        # ---Distortion coefficients (k1, k2, p1, p2, k3)
+        self.dist_coeffs = np.array([0.07206577, 0.08106335, 0.00300317, 0.00042163, -0.40383728], dtype=np.float64)
+
 
         
 
@@ -36,6 +36,10 @@ class VisionTest(Node):
         # self.get_logger().info(f"Received RGB image with size: {msg.width}x{msg.height}")
 
         cv_image = CvBridge().imgmsg_to_cv2(msg, desired_encoding='bgr8')
+
+        
+
+        cv_image = cv2.undistort(cv_image, self.intrinsics, self.dist_coeffs)
 
         if self.background_limit == None:
 
@@ -63,6 +67,12 @@ class VisionTest(Node):
         # Find the die
         mask = self.segment_die(cv_image)
 
+        mask_copy = mask.copy()
+
+        mask_copy = cv2.resize(mask_copy, (640, 480))
+
+        cv2.imshow("Die Mask", mask_copy)
+
         # Get die contours
         die_contour, die_hierarchy = self.find_die_contour(mask)
 
@@ -71,7 +81,7 @@ class VisionTest(Node):
         die_outer = die_contour[outer_idx]
 
         # Build top-face polygon and a "safe" mask inside it
-        top_poly, rotatedRect = self.minarea_top_polygon(die_outer, shrink=0.72)
+        top_poly, rotatedRect = self.minarea_top_polygon(die_outer, shrink=1.0)
         top_mask = self.polygon_mask(cv_image.shape, top_poly, erode_px=4)
 
         rect_size =  rotatedRect[1]
@@ -142,41 +152,7 @@ class VisionTest(Node):
         cv2.imshow("Mask", cv_image)
         cv2.waitKey(1)
 
-    def set_blob_detector(self):
-        # Setup SimpleBlobDetector parameters.
-        self.params = cv2.SimpleBlobDetector_Params()
-
-        # Change thresholds
-        self.params.minThreshold = 10
-        self.params.maxThreshold = 200
-
-
-        # Filter by Area.
-        self.params.filterByArea = True
-        self.params.minArea = 1500
-
-        # Filter by Circularity
-        self.params.filterByCircularity = True
-        self.params.minCircularity = 0.1
-
-        # Filter by Convexity
-        self.params.filterByConvexity = True
-        self.params.minConvexity = 0.87
-
-        # Filter by Inertia
-        self.params.filterByInertia = True
-        self.params.minInertiaRatio = 0.01
-
-        # Create a detector with the parameters
-        self.blobDetector = cv2.SimpleBlobDetector_create(self.params)
-
-    def detect_blobs(self, image): 
-
-        keypoints = self.blobDetector.detect(image)
-
-        im_with_keypoints = cv2.drawKeypoints(image, keypoints, np.array([]), (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
-
-        return keypoints, im_with_keypoints
+    
 
     def segment_background(self, image): 
 
@@ -211,8 +187,12 @@ class VisionTest(Node):
     def segment_die(self, image): 
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(hsv, HSV_LO, HSV_HI)
-        # mask = cv2.dilate(mask, np.ones((5,5), np.uint8), iterations=1)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3,3), np.uint8))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5,5), np.uint8))
+        mask = cv2.dilate(mask, np.ones((7,7), np.uint8), iterations=1)
+        mask = cv2.erode(mask, np.ones((3,3), np.uint8), iterations=1)
+
+        # mask = cv2.dilate(mask, np.ones((3,3), np.uint8), iterations=1)
+
         # mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5,5), np.uint8))
 
         return mask
