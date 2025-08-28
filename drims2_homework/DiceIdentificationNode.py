@@ -95,6 +95,9 @@ class DiceIdentificationNode(Node):
         # Get die contours
         die_contour, die_hierarchy = self.find_die_contour(mask)
 
+        if len(die_contour) == 0: 
+            return
+
         # Choose the OUTER die contour (largest area) to define the top polygon
         outer_idx = np.argmax([cv2.contourArea(c) for c in die_contour])
         die_outer = die_contour[outer_idx]
@@ -293,7 +296,7 @@ class DiceIdentificationNode(Node):
             raise ValueError("Dice position is not available")
         
         x_pixel, y_pixel = self.dice_position
-        Z_cam_dice = 0.742136 - 0.05
+        Z_cam_dice = 0.742136 - 0.01
 
         X = Z_cam_dice * (x_pixel - self.intrinsics[0, 2]) / self.intrinsics[0, 0]
         Y = Z_cam_dice * (y_pixel - self.intrinsics[1, 2]) / self.intrinsics[1, 1]
@@ -313,7 +316,7 @@ class DiceIdentificationNode(Node):
 
     def cam_to_world(self, tf_cam_dice):
 
-        tf_world_dice = self.extrinsics @ tf_cam_dice
+        tf_world_dice = np.linalg.inv(self.extrinsics) @ tf_cam_dice
 
         
         return tf_world_dice
