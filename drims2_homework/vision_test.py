@@ -28,6 +28,10 @@ class VisionTest(Node):
 
         self.background_limit = None
 
+        self.set_blob_detector()
+
+        
+
     def rgb_callback(self, msg):
         # self.get_logger().info(f"Received RGB image with size: {msg.width}x{msg.height}")
 
@@ -60,28 +64,76 @@ class VisionTest(Node):
         mask = self.segment_die(cv_image)
 
         # Get die contours
-        die_countour, die_hierarchy = self.find_die_contour(mask)
-        # Select internal contours (those with a parent, i.e., hierarchy[0][i][3] != -1)
-        internal_contours = [cnt for i, cnt in enumerate(die_countour) if die_hierarchy[0][i][3] != -1]
+        die_contour, die_hierarchy = self.find_die_contour(mask)
 
+        # Choose the OUTER die contour (largest area) to define the top polygon
+        outer_idx = np.argmax([cv2.contourArea(c) for c in die_contour])
+        die_outer = die_contour[outer_idx]
+
+        # Build top-face polygon and a "safe" mask inside it
+        top_poly, rotatedRect = self.minarea_top_polygon(die_outer, shrink=0.72)
+        top_mask = self.polygon_mask(cv_image.shape, top_poly, erode_px=4)
+
+        rect_size =  rotatedRect[1]
+        rect_angle = rotatedRect[2]
+
+        # Convert top_poly (4 points) to integer coordinates
+
+        # Draw the top face polygon on the image
+        cv2.polylines(cv_image, [top_poly], isClosed=True, color=(0, 255, 0), thickness=2)
+
+
+
+        # (Optional) visualize top polygon
+        # cv2.polylines(cv_image, [top_poly], True, (255, 0, 0), 2)
+
+        # Select internal contours (those with a parent, i.e., hierarchy[0][i][3] != -1)
+        internal_contours = [cnt for i, cnt in enumerate(die_contour) if die_hierarchy[0][i][3] != -1]
+
+        dots_number = 0
+        mean = np.zeros((2,))
         # For each internal contour, fit an ellipse
         for cnt in internal_contours:
-            if len(cnt) >= 5:  # Fit ellipse requires at least 5 points
-                ellipse = cv2.fitEllipse(cnt)
-                cv2.ellipse(cv_image, ellipse, (0, 0, 255), 2)
+            if len(cnt) < 5:
+                continue 
 
-        circle_contr, circle_hier = self.find_circles(mask)
+            if not np.all(top_mask[cnt[:, 0, 1], cnt[:, 0, 0]]):
+                continue
+            # Fit ellipse requires at least 5 points
+            ellipse = cv2.fitEllipse(cnt)
 
-        # cv2.drawContours(cv_image, internal_contours, -1, (0,255,0), 3)
-        # print(len(countour))
+            center = np.array(ellipse[0])
+
+            
 
 
+            mean += center 
 
-        # Draw contours on the image
-        # cv2.drawContours(cv_image, countour, -1, (0,255,0), 3)
+            cv2.ellipse(cv_image, ellipse, (0, 0, 255), 2)
 
-        # cv2.drawContours(cv_image, circle_conts, -1, (0,0,255), 3)
+            dots_number +=1
 
+
+        if dots_number > 0:
+            mean = mean / dots_number
+            mean_point = tuple(np.round(mean).astype(int))
+            cv2.circle(cv_image, mean_point, 8, (255, 0, 255), -1)
+
+            # Draw an arrow indicating the direction of the dice
+
+            # Calculate arrow length proportional to the rectangle size
+            arrow_length = int(max(rect_size) * 2.0)
+
+            # Calculate direction vector based on angle
+            angle_rad = np.deg2rad(rect_angle)
+            dx = int(arrow_length * np.cos(angle_rad))
+            dy = int(arrow_length * np.sin(angle_rad))
+
+            arrow_tip = (mean_point[0] + dx, mean_point[1] + dy)
+
+            cv2.arrowedLine(cv_image, mean_point, arrow_tip, (0, 255, 255), 3, tipLength=0.2)
+
+        print("Face: ", dots_number)
         cv_image = cv2.resize(cv_image, (640, 480))
         # # cv_image = mask
 
@@ -89,6 +141,42 @@ class VisionTest(Node):
 
         cv2.imshow("Mask", cv_image)
         cv2.waitKey(1)
+
+    def set_blob_detector(self):
+        # Setup SimpleBlobDetector parameters.
+        self.params = cv2.SimpleBlobDetector_Params()
+
+        # Change thresholds
+        self.params.minThreshold = 10
+        self.params.maxThreshold = 200
+
+
+        # Filter by Area.
+        self.params.filterByArea = True
+        self.params.minArea = 1500
+
+        # Filter by Circularity
+        self.params.filterByCircularity = True
+        self.params.minCircularity = 0.1
+
+        # Filter by Convexity
+        self.params.filterByConvexity = True
+        self.params.minConvexity = 0.87
+
+        # Filter by Inertia
+        self.params.filterByInertia = True
+        self.params.minInertiaRatio = 0.01
+
+        # Create a detector with the parameters
+        self.blobDetector = cv2.SimpleBlobDetector_create(self.params)
+
+    def detect_blobs(self, image): 
+
+        keypoints = self.blobDetector.detect(image)
+
+        im_with_keypoints = cv2.drawKeypoints(image, keypoints, np.array([]), (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+
+        return keypoints, im_with_keypoints
 
     def segment_background(self, image): 
 
@@ -144,6 +232,33 @@ class VisionTest(Node):
         cnts, hierarchy = cv2.findContours(mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
 
         return cnts, hierarchy
+    
+    def minarea_top_polygon(self, die_outer_cnt, shrink=0.72):
+        """
+        Return a 4-pt polygon (np.int32) that approximates the TOP face,
+        by shrinking the minAreaRect so lateral faces fall outside.
+        """
+        rect = cv2.minAreaRect(die_outer_cnt)       # (center, (w,h), angle)
+        # box = cv2.boxPoints(rect).astype(np.float32)  # 4x2
+        box = cv2.boxPoints(rect)  # 4x2
+
+        # Shrink around the rectangle center
+        c = box.mean(axis=0, keepdims=True)          # 1x2
+        box_shrunk = (box - c) * shrink + c
+        return box_shrunk.astype(np.int32), rect
+
+    
+    def polygon_mask(self, shape, poly, erode_px=4):
+        """
+        Create a mask for the polygon and erode to enforce a margin so
+        side pips near edges are discarded.
+        """
+        m = np.zeros(shape[:2], dtype=np.uint8)
+        cv2.fillPoly(m, [poly], 255)
+        if erode_px > 0:
+            m = cv2.erode(m, np.ones((erode_px, erode_px), np.uint8), iterations=1)
+        return m
+
 
     def dice_identification(self):
         if not self.dice_identification_client.wait_for_service(timeout_sec=5.0):
