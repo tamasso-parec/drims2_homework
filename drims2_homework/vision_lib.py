@@ -10,6 +10,8 @@ import cv2
 from cv_bridge import CvBridge
 import numpy as np
 
+from scipy.spatial.transform import Rotation as R
+
 __all__ = [
     "rclpy",
     "Node",
@@ -20,5 +22,6 @@ __all__ = [
     "Image",
     "cv2",
     "CvBridge",
-    "np"
+    "np", 
+    "R"
 ]
