@@ -9,12 +9,29 @@ class DiceIdentificationNode(Node):
     def __init__(self):
         super().__init__('dice_identification_node', use_global_arguments=False)
 
+        self.declare_parameter('robot_number', 1)
+
+        robot_number = self.get_parameter('robot_number').get_parameter_value().integer_value
+
+        if robot_number == 1:
+            self.cam = CAMERA_1
+        elif robot_number == 2:
+            self.cam = CAMERA_2
+        elif robot_number == 3:
+            self.cam = CAMERA_3
+        else:
+            self.get_logger().warn(f"Unknown robot_number {robot_number}, using default camera.")
+            self.cam = CAMERA_1
+
         self.rgb_subscribe = self.create_subscription(
             Image,
             '/color/video/image',
             self.rgb_callback,
             10
         )
+
+        self.tf_publisher =  TransformBroadcaster(self)
+        self.clock = Clock()
 
         self.dice_identification_srv = self.create_service(DiceIdentification, 'dice_identification', self.dice_identification_callback)
 
@@ -24,22 +41,6 @@ class DiceIdentificationNode(Node):
         self.dice_angle = None
         self.face_number = None
 
-        # --- Camera intrinsics
-        self.intrinsics = np.array(
-            [[1.57855692e+03, 0.00000000e+00, 9.52440456e+02],
-             [0.00000000e+00, 1.58246225e+03, 5.45655012e+02],
-             [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]],
-            dtype=np.float64
-        )
-
-        # ---Distortion coefficients (k1, k2, p1, p2, k3)
-        self.dist_coeffs = np.array([0.07206577, 0.08106335, 0.00300317, 0.00042163, -0.40383728], dtype=np.float64)
-
-        #--- Extrinsics
-        self.extrinsics = np.array([[0.998855,-0.019105,0.043869,-0.236381],
-                                    [0.020615,0.999201,-0.034238,-0.214228],
-                                    [-0.043180, 0.035103,0.998450,0.742136],
-                                    [0.0,0.0,0.0,1.0]],dtype=np.float64)
 
 
     def rgb_callback(self, msg):
@@ -47,9 +48,7 @@ class DiceIdentificationNode(Node):
 
         original_image = CvBridge().imgmsg_to_cv2(msg, desired_encoding='bgr8')
 
-        
-
-        original_image = cv2.undistort(original_image, self.intrinsics, self.dist_coeffs)
+        original_image = cv2.undistort(original_image, self.cam.intrinsics, self.cam.dist_coeffs)
 
         if self.background_limit == None:
 
@@ -115,7 +114,6 @@ class DiceIdentificationNode(Node):
         cv2.polylines(cv_image, [top_poly], isClosed=True, color=(0, 255, 0), thickness=2)
 
 
-
         # (Optional) visualize top polygon
         # cv2.polylines(cv_image, [top_poly], True, (255, 0, 0), 2)
 
@@ -149,6 +147,7 @@ class DiceIdentificationNode(Node):
         mean_point = None
 
         if dots_number > 0:
+
             mean = mean / dots_number
             mean_point = tuple(np.round(mean).astype(int))
             cv2.circle(cv_image, mean_point, 8, (255, 0, 255), -1)
@@ -180,7 +179,7 @@ class DiceIdentificationNode(Node):
         cv_image = cv2.resize(original_image, (640, 480))
         # # cv_image = mask
 
-
+        self.publish_dice_TF()
 
         cv2.imshow("Mask", cv_image)
         cv2.waitKey(1)
@@ -201,11 +200,13 @@ class DiceIdentificationNode(Node):
         return mask
     
     def contour_background(self, mask): 
+
         cnts, hierarchy = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         return cnts, hierarchy
     
     def bound_background(self, contours, hierarchy): 
+
         if len(contours) == 0:
             return None
 
@@ -298,15 +299,12 @@ class DiceIdentificationNode(Node):
         x_pixel, y_pixel = self.dice_position
         Z_cam_dice = 0.742136 - 0.01
 
-        X = Z_cam_dice * (x_pixel - self.intrinsics[0, 2]) / self.intrinsics[0, 0]
-        Y = Z_cam_dice * (y_pixel - self.intrinsics[1, 2]) / self.intrinsics[1, 1]
+        X = Z_cam_dice * (x_pixel - self.cam.intrinsics[0, 2]) / self.cam.intrinsics[0, 0]
+        Y = Z_cam_dice * (y_pixel - self.cam.intrinsics[1, 2]) / self.cam.intrinsics[1, 1]
 
         theta = np.deg2rad(self.dice_angle)
-        Rz = np.array([
-            [np.cos(theta), -np.sin(theta), 0],
-            [np.sin(theta),  np.cos(theta), 0],
-            [0,              0,             1]
-        ])
+        Rz = R.from_euler('z', theta).as_matrix()
+
 
         tf_cam_dice = np.eye(4)
         tf_cam_dice[:3, :3] = Rz
@@ -316,7 +314,7 @@ class DiceIdentificationNode(Node):
 
     def cam_to_world(self, tf_cam_dice):
 
-        tf_world_dice = np.linalg.inv(self.extrinsics) @ tf_cam_dice
+        tf_world_dice = np.linalg.inv(self.cam.extrinsics) @ tf_cam_dice
 
         
         return tf_world_dice
@@ -339,10 +337,12 @@ class DiceIdentificationNode(Node):
         r_world_dice = R.from_matrix(tf_world_dice[:3, :3]).as_quat()  # x, y, z, w
         t_world_dice = tf_world_dice[:3, 3]
 
-        pose.header.frame_id = "world"
+        pose.header.frame_id = "checkerboard"
         pose.header.stamp = self.get_clock().now().to_msg()
-        pose.pose.position.x = t_world_dice[0]
-        pose.pose.position.y = t_world_dice[1]
+
+        # N.B. We have to rotate the frame due to a missing tra
+        pose.pose.position.x = t_world_dice[1]
+        pose.pose.position.y = -t_world_dice[0] 
         pose.pose.position.z = t_world_dice[2]
         pose.pose.orientation.x = r_world_dice[0]
         pose.pose.orientation.y = r_world_dice[1]
@@ -357,6 +357,40 @@ class DiceIdentificationNode(Node):
 
         
         return response
+    
+    def publish_dice_TF(self): 
+
+        try: 
+                
+
+            tf_world_dice = self.cam_to_world(self.get_TF_cam_dice())
+
+        
+        except:
+            
+            self.get_logger().error("Failed to identify dice")
+
+            pass
+
+        t = TransformStamped()
+        t.header.stamp = self.clock.now().to_msg()
+        t.header.frame_id = 'checkerboard'
+        t.child_frame_id = 'dice_center'
+
+        r_world_dice = R.from_matrix(tf_world_dice[:3, :3]).as_quat()
+        
+        # Assuming the transform from drone to camera is fixed and known
+        t.transform.translation.x =  tf_world_dice[1, 3] # Example values, replace with actual values from sdf model
+        t.transform.translation.y = -tf_world_dice[0, 3]
+        t.transform.translation.z = tf_world_dice[2, 3]
+        t.transform.rotation.x = r_world_dice[0]
+        t.transform.rotation.y = r_world_dice[1]
+        t.transform.rotation.z = r_world_dice[2]
+        t.transform.rotation.w = r_world_dice[3]
+        
+        self.tf_publisher.sendTransform(t)
+
+        
 
         
 
