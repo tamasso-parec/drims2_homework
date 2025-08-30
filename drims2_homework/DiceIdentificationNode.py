@@ -11,6 +11,9 @@ class DiceIdentificationNode(Node):
 
         self.declare_parameter('robot_number', 1)
 
+        self.origin_frame = "table_top"
+        self.dice_frame = "dice_center"
+
         robot_number = self.get_parameter('robot_number').get_parameter_value().integer_value
 
         if robot_number == 1:
@@ -297,7 +300,7 @@ class DiceIdentificationNode(Node):
             raise ValueError("Dice position is not available")
         
         x_pixel, y_pixel = self.dice_position
-        Z_cam_dice = 0.742136 - 0.01
+        Z_cam_dice = self.cam.extrinsics[2,3] - 0.01
 
         X = Z_cam_dice * (x_pixel - self.cam.intrinsics[0, 2]) / self.cam.intrinsics[0, 0]
         Y = Z_cam_dice * (y_pixel - self.cam.intrinsics[1, 2]) / self.cam.intrinsics[1, 1]
@@ -337,7 +340,7 @@ class DiceIdentificationNode(Node):
         r_world_dice = R.from_matrix(tf_world_dice[:3, :3]).as_quat()  # x, y, z, w
         t_world_dice = tf_world_dice[:3, 3]
 
-        pose.header.frame_id = "checkerboard"
+        pose.header.frame_id = self.dice_frame
         pose.header.stamp = self.get_clock().now().to_msg()
 
         # N.B. We have to rotate the frame due to a missing tra
@@ -374,8 +377,8 @@ class DiceIdentificationNode(Node):
 
         t = TransformStamped()
         t.header.stamp = self.clock.now().to_msg()
-        t.header.frame_id = 'checkerboard'
-        t.child_frame_id = 'dice_center'
+        t.header.frame_id = self.origin_frame
+        t.child_frame_id = self.dice_frame
 
         r_world_dice = R.from_matrix(tf_world_dice[:3, :3]).as_quat()
         
