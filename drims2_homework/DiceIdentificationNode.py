@@ -9,9 +9,9 @@ class DiceIdentificationNode(Node):
     def __init__(self):
         super().__init__('dice_identification_node', use_global_arguments=False)
 
-        self.declare_parameter('robot_number', 1)
+        self.declare_parameter('robot_number', 2)
 
-        self.origin_frame = "table_top"
+        self.origin_frame = "checkerboard"
         self.dice_frame = "dice_center"
 
         robot_number = self.get_parameter('robot_number').get_parameter_value().integer_value
@@ -25,6 +25,11 @@ class DiceIdentificationNode(Node):
         else:
             self.get_logger().warn(f"Unknown robot_number {robot_number}, using default camera.")
             self.cam = CAMERA_1
+
+        print(self.cam.name)
+
+        print(self.cam.extrinsics)
+
 
         self.rgb_subscribe = self.create_subscription(
             Image,
@@ -82,7 +87,8 @@ class DiceIdentificationNode(Node):
         cv2.rectangle(original_image, (xback, yback), (xback + wback, yback + hback), (255, 0, 0), 2)
 
         # Crop the image to the bounding box
-        cv_image = original_image[yback:yback+hback, xback:xback+wback]
+        # cv_image = original_image[yback:yback+hback, xback:xback+wback]
+        cv_image = original_image
 
 
         # Find the die
@@ -110,6 +116,10 @@ class DiceIdentificationNode(Node):
 
         rect_size =  rotatedRect[1]
         rect_angle = rotatedRect[2]
+
+        if self.dice_angle:
+            if np.abs(rect_angle - self.dice_angle) >= 80: 
+                rect_angle = self.dice_angle
 
         # Convert top_poly (4 points) to integer coordinates
 
@@ -290,6 +300,8 @@ class DiceIdentificationNode(Node):
         pose = result_future.result().pose
         success = result_future.result().success
 
+        self.publish_dice_TF()
+
         return face_number, pose, success
     
     def get_TF_cam_dice(self): 
@@ -300,7 +312,7 @@ class DiceIdentificationNode(Node):
             raise ValueError("Dice position is not available")
         
         x_pixel, y_pixel = self.dice_position
-        Z_cam_dice = self.cam.extrinsics[2,3] - 0.01
+        Z_cam_dice = self.cam.extrinsics[2,3] - self.cam.vertical_offset
 
         X = Z_cam_dice * (x_pixel - self.cam.intrinsics[0, 2]) / self.cam.intrinsics[0, 0]
         Y = Z_cam_dice * (y_pixel - self.cam.intrinsics[1, 2]) / self.cam.intrinsics[1, 1]
@@ -383,7 +395,7 @@ class DiceIdentificationNode(Node):
         r_world_dice = R.from_matrix(tf_world_dice[:3, :3]).as_quat()
         
         # Assuming the transform from drone to camera is fixed and known
-        t.transform.translation.x =  tf_world_dice[1, 3] # Example values, replace with actual values from sdf model
+        t.transform.translation.x = tf_world_dice[1, 3] 
         t.transform.translation.y = -tf_world_dice[0, 3]
         t.transform.translation.z = tf_world_dice[2, 3]
         t.transform.rotation.x = r_world_dice[0]

@@ -19,12 +19,13 @@ from scipy.spatial.transform import Rotation as R
 
 
 class RobotCameraParams():
-    def __init__(self,  robot_number=0, name = "",  intrinsics= np.zeros((3,3)),  dist_coeffs =  np.array((5,)), extrinsics = np.eye(4)):
+    def __init__(self,  robot_number=0, name = "",  intrinsics= np.zeros((3,3)),  dist_coeffs =  np.array((5,)), extrinsics = np.eye(4), vertical_offset=0.0):
         self.name = name
         self.robot_number = robot_number
         self.intrinsics = intrinsics
         self.dist_coeffs = dist_coeffs
         self.extrinsics = extrinsics
+        self.vertical_offset = 0.0
 
 
 CAMERA_1 = RobotCameraParams(
@@ -44,7 +45,8 @@ CAMERA_1 = RobotCameraParams(
     extrinsics =np.array([[0.999831,-0.015292,-0.010167,-0.062168],
                           [0.015271, 0.999881,-0.002154,-0.071062],
                           [0.010198, 0.001998, 0.999946, 0.717149],
-                          [0.0,0.0,0.0,1.0]],dtype=np.float64)
+                          [0.0,0.0,0.0,1.0]],dtype=np.float64), 
+    vertical_offset= 0.01
 )
 CAMERA_2 = RobotCameraParams(
     robot_number= 2,
@@ -63,7 +65,8 @@ CAMERA_2 = RobotCameraParams(
     extrinsics =np.array([[0.999581,-0.018623, 0.022175,-0.013014],
                           [0.019132, 0.999553,-0.022993,-0.037747],
                           [-0.021737, 0.023408, 0.999490, 0.737709],
-                          [0.0,0.0,0.0,1.0]],dtype=np.float64)
+                          [0.0,0.0,0.0,1.0]],dtype=np.float64), 
+    vertical_offset= -0.02
 )
 CAMERA_3 = RobotCameraParams(
     robot_number= 3,
@@ -82,7 +85,8 @@ CAMERA_3 = RobotCameraParams(
     extrinsics =np.array([[0.999165,-0.031847, 0.025596,-0.006487],
                           [0.031435, 0.999373, 0.016305,-0.036230],
                           [-0.026099,-0.015486, 0.999539, 0.766089],
-                          [0.0,0.0,0.0,1.0]],dtype=np.float64)
+                          [0.0,0.0,0.0,1.0]],dtype=np.float64), 
+    vertical_offset=0.0
 )
 
 __all__ = [
